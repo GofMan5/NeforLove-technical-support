@@ -261,50 +261,13 @@ create_backup() {
 pull_updates() {
     print_step "4/7" "Получение обновлений..."
     
-    # Check for local changes
-    if ! git diff --quiet || ! git diff --cached --quiet; then
-        print_warning "Обнаружены локальные изменения"
-        
-        if [[ "$FORCE_UPDATE" == true ]]; then
-            print_info "Сброс локальных изменений (--force)..."
-            git reset --hard HEAD
-        else
-            echo ""
-            echo "Выберите действие:"
-            echo "  1) Сохранить изменения (git stash) и обновить"
-            echo "  2) Отменить изменения и обновить"
-            echo "  3) Отмена обновления"
-            echo ""
-            echo -n "Ваш выбор (1/2/3): "
-            read -n 1 -r REPLY < /dev/tty
-            echo
-            
-            case $REPLY in
-                1)
-                    print_info "Сохранение изменений в stash..."
-                    git stash push -m "Auto-stash before update $(date)"
-                    print_success "Изменения сохранены в stash"
-                    ;;
-                2)
-                    print_info "Сброс локальных изменений..."
-                    git reset --hard HEAD
-                    print_success "Изменения отменены"
-                    ;;
-                *)
-                    print_info "Обновление отменено"
-                    exit 0
-                    ;;
-            esac
-        fi
-    fi
-    
-    # Fetch and pull
+    # Fetch latest changes
     print_info "Получение изменений из репозитория..."
     git fetch origin
     
-    local CURRENT_BRANCH=$(git branch --show-current)
-    
-    if git pull origin "$CURRENT_BRANCH"; then
+    # Use reset --hard to handle any history changes (force push, squash, etc.)
+    print_info "Применение обновлений..."
+    if git reset --hard origin/main; then
         print_success "Обновления получены"
     else
         print_error "Не удалось получить обновления"
