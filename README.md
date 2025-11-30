@@ -20,6 +20,12 @@ curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support
 ## Обновление
 
 ```bash
+cd ~/support-bot && curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support/main/update.sh | bash
+```
+
+Или локально:
+
+```bash
 ./update.sh
 ```
 
