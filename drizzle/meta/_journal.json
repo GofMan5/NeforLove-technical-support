@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1764417856322,
+      "tag": "0000_nifty_vapor",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1764418923369,
+      "tag": "0001_thin_pretty_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1764419000000,
+      "tag": "0002_remove_locale_default",
+      "breakpoints": true
+    }
+  ]
+}

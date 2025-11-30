@@ -1,0 +1,40 @@
+{
+  "name": "telegram-bot-modular",
+  "version": "1.0.0",
+  "description": "Modular Telegram bot architecture with grammY, Drizzle ORM and TypeScript",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "grammy",
+    "typescript",
+    "modular"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "grammy": "^1.21.1",
+    "drizzle-orm": "^0.40.0",
+    "better-sqlite3": "^9.4.3",
+    "dotenv": "^16.4.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.2",
+    "fast-check": "^3.15.0",
+    "drizzle-kit": "^0.30.0",
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.11.16",
+    "tsx": "^4.7.0"
+  }
+}

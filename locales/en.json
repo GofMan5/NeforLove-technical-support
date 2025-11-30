@@ -1,0 +1,73 @@
+{
+  "start": {
+    "welcome": "👋 Hello, {{name}}!\n\nI'm a technical support bot.\nPress the button below to create a ticket."
+  },
+  "stats": {
+    "menu_title": "📊 *Statistics*\n\nSelect a section:",
+    "personal_btn": "👤 Personal Stats",
+    "team_btn": "👥 Team Stats",
+    "top_btn": "🏆 Top Agents",
+    "back": "Back",
+    "personal_title": "👤 *Personal Statistics*",
+    "tickets_handled": "🎫 Tickets handled: {{count}}",
+    "messages_sent": "💬 Messages sent: {{count}}",
+    "tickets_closed": "✅ Tickets closed: {{count}}",
+    "team_title": "👥 *Team Statistics*",
+    "total_tickets": "🎫 Total tickets: {{count}}",
+    "open_tickets": "📬 Open: {{count}}",
+    "closed_tickets": "📪 Closed: {{count}}",
+    "active_agents": "🛡 Active agents: {{count}}",
+    "top_title": "🏆 *Top Agents*",
+    "no_data": "_No data_",
+    "lb_messages": "💬 {{count}}",
+    "lb_tickets": "🎫 {{count}}",
+    "your_position": "📍 *Your position:*"
+  },
+  "lang": {
+    "title": "🌐 Select language:",
+    "changed": "✅ Language changed to English"
+  },
+  "buttons": {
+    "english": "🇬🇧 English",
+    "russian": "🇷🇺 Русский",
+    "new_ticket": "📝 Create ticket",
+    "close_ticket": "❌ Close ticket"
+  },
+  "ticket": {
+    "active": "🎫 Ticket #{{id}}\n📝 {{subject}}\n📅 {{date}}\n\n💬 Send messages or photos — we'll receive them.",
+    "enter_subject": "📝 Describe your issue in one message:",
+    "created": "✅ Ticket #{{id}} created!\n\nNow just send messages or photos.",
+    "closed": "✅ Ticket closed",
+    "closed_by_admin": "✅ Your ticket was closed by support.",
+    "closed_by_user": "👤 User closed the ticket.",
+    "no_active": "❌ You don't have an active ticket.",
+    "already_exists": "You already have an active ticket",
+    "message_sent": "✅ Message sent",
+    "photo_sent": "✅ Photo sent",
+    "banned": "🚫 You are banned and cannot create tickets."
+  },
+  "user": {
+    "banned": "🚫 You have been banned.",
+    "unbanned": "✅ You have been unbanned! You can now create tickets again."
+  },
+  "role": {
+    "support_granted": "🛡 You have been granted support role!",
+    "support_revoked": "📋 Your support role has been revoked."
+  },
+  "admin": {
+    "ticket_closed": "❌ Ticket closed",
+    "user_banned": "🚫 User banned",
+    "user_unbanned": "✅ User unbanned",
+    "no_access": "❌ Access denied"
+  },
+  "errors": {
+    "generic": "An error occurred. Please try again later."
+  },
+  "system": {
+    "ticket_closed_by_admin": "🔒 Ticket closed by {{admin}}",
+    "user_banned_in_topic": "🚫 User banned by administrator",
+    "user_unbanned_in_topic": "✅ User unbanned by administrator",
+    "message_delivery_failed": "⚠️ Failed to deliver message. Please try again.",
+    "message_forward_failed": "⚠️ Failed to forward message to support. Please try again."
+  }
+}

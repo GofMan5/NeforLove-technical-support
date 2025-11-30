@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+
+# Database
+data/*.db
+data/*.db-journal
+data/*.sqlite
+*.sqlite
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+.kiro
+
+# Test coverage
+coverage/
+
+# Test databases
+data/test-*.sqlite
+
+# TypeScript
+*.tsbuildinfo
+
+# npm
+npm-debug.log*
+.npm
