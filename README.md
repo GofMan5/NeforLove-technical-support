@@ -4,42 +4,34 @@
 
 ## Быстрая установка
 
-Автоматическая установка одной командой:
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support/main/install.sh | bash
 ```
 
-Или с wget:
+Скрипт автоматически:
+- Клонирует репозиторий
+- Устанавливает зависимости
+- Запрашивает конфигурацию (токен, ID админов, ID группы)
+- Настраивает базу данных
+- Создаёт systemd сервис
+
+Флаги: `--no-systemd`, `--dir <path>`, `--local`, `--help`
+
+## Обновление
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support/main/install.sh | bash
+./update.sh
 ```
 
-### Флаги установки
+Скрипт обновления:
+- Создаёт бэкап (.env, data, locales)
+- Останавливает сервис
+- Получает обновления из git
+- Обновляет зависимости и компилирует
+- Запускает миграции БД
+- Перезапускает сервис
 
-| Флаг | Описание |
-|------|----------|
-| `--help` | Показать справку по использованию |
-| `--no-systemd` | Пропустить создание systemd сервиса |
-| `--dir <path>` | Указать директорию установки (по умолчанию: ~/support-bot) |
-| `--local` | Локальная установка в текущую директорию (без клонирования) |
-
-Примеры:
-
-```bash
-# Установка в кастомную директорию
-curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support/main/install.sh | bash -s -- --dir /opt/bot
-
-# Установка без systemd сервиса
-curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support/main/install.sh | bash -s -- --no-systemd
-
-# Локальная установка (если уже склонировали репозиторий)
-./install.sh --local
-
-# Показать справку
-curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support/main/install.sh | bash -s -- --help
-```
+Флаги: `--no-backup`, `--no-tests`, `--force`, `--help`
 
 ## Ручная установка
 
@@ -47,11 +39,13 @@ curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support
 npm install
 cp .env.example .env
 # заполни .env
+npm run build
+npm run db:migrate
 ```
 
 ## Настройка
 
-Создай группу в телеграме с топиками, добавь бота админом. Получи ID группы (можно через @getidsbot).
+Создай группу в телеграме с топиками, добавь бота админом.
 
 ```env
 BOT_TOKEN=токен_от_botfather
@@ -66,18 +60,18 @@ LOCALES_PATH=./locales
 ## Запуск
 
 ```bash
-# dev
-npm run dev
-
-# prod
-npm run build
-npm start
+npm run dev    # разработка
+npm start      # продакшн
 ```
 
-## Команды бота
+## Управление сервисом
 
-- `/start` - Start bot
-- `/lang` - Настройка лангуаге
+```bash
+sudo systemctl status support-bot
+sudo systemctl restart support-bot
+sudo journalctl -u support-bot -f
+```
+
 ## Структура
 
 ```
@@ -95,11 +89,4 @@ src/
 
 ```bash
 npm test
-```
-
-## Миграции
-
-```bash
-npm run db:generate
-npm run db:migrate
 ```
