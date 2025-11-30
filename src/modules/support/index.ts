@@ -546,10 +546,13 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     
     const topicId = parseInt(data.replace(CB.ADMIN_DELETE_TOPIC, ''));
     try {
-      await ctx.api.deleteForumTopic(ctx.config.bot.supportGroupId, topicId);
+      // deleteForumTopic deletes the topic and all its messages
+      const result = await ctx.api.deleteForumTopic(ctx.config.bot.supportGroupId, topicId);
+      ctx.logger.info('Delete topic result', { topicId, result });
       await ctx.answerCallbackQuery({ text: '✅ Топик удалён' });
     } catch (e) {
-      ctx.logger.warn('Failed to delete topic', { topicId, error: e });
+      // Log full error for debugging
+      ctx.logger.error('Failed to delete topic', e instanceof Error ? e : new Error(String(e)), { topicId });
       await ctx.answerCallbackQuery({ text: '❌ Не удалось удалить топик', show_alert: true });
     }
     return;
