@@ -58,7 +58,9 @@
     "ticket_closed": "❌ Ticket closed",
     "user_banned": "🚫 User banned",
     "user_unbanned": "✅ User unbanned",
-    "no_access": "❌ Access denied"
+    "no_access": "❌ Access denied",
+    "topic_deleted": "✅ Topic deleted",
+    "topic_delete_failed": "❌ Failed to delete topic"
   },
   "errors": {
     "generic": "An error occurred. Please try again later."

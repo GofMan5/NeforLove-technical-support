@@ -15,11 +15,16 @@ const CB = {
   ADMIN_BAN: 'admin:ban:',
   ADMIN_BAN_CONFIRM: 'admin:ban_confirm:',
   ADMIN_BAN_CANCEL: 'admin:ban_cancel',
+  ADMIN_DELETE_TOPIC: 'admin:delete_topic:',
   // Admin panel
   ADMIN_PANEL: 'admin:panel',
   ADMIN_SET_SUPPORT: 'admin:set_support:',
   ADMIN_REMOVE_SUPPORT: 'admin:remove_support:',
 } as const;
+
+// Topic icon colors (used at creation time)
+// 0x6FB9F0 - Blue (open), 0x8EEE98 - Green (closed)
+const TOPIC_ICON_COLOR_OPEN = 0x6FB9F0;
 
 // Helper to get or create user with role, always updates profile info
 function getOrCreateUser(ctx: BotContext, telegramId: number): { role: UserRole } {
@@ -68,6 +73,8 @@ function getTicketByTopicId(ctx: BotContext, topicId: number) {
     .where(and(eq(tickets.topicId, topicId), eq(tickets.status, 'open'))).get();
 }
 
+
+
 function getMessageByUserMessageId(ctx: BotContext, ticketId: number, userMessageId: number) {
   return ctx.db.select().from(messages)
     .where(and(eq(messages.ticketId, ticketId), eq(messages.userMessageId, userMessageId))).get();
@@ -82,6 +89,24 @@ function getAdminKeyboard(ticketId: number, telegramId: number): InlineKeyboard 
   return new InlineKeyboard()
     .text('❌ Закрыть', CB.ADMIN_CLOSE + ticketId)
     .text('🚫 Бан', CB.ADMIN_BAN + telegramId);
+}
+
+function getClosedTicketKeyboard(topicId: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('🗑 Удалить топик', CB.ADMIN_DELETE_TOPIC + topicId);
+}
+
+// Helper to update topic name with status indicator
+async function updateTopicStatus(ctx: BotContext, topicId: number, originalName: string, isClosed: boolean): Promise<void> {
+  try {
+    const statusPrefix = isClosed ? '✅ ' : '';
+    const newName = statusPrefix + originalName.replace(/^✅ /, '');
+    await ctx.api.editForumTopic(ctx.config.bot.supportGroupId, topicId, {
+      name: newName.slice(0, 128),
+    });
+  } catch (e) {
+    ctx.logger.warn('Failed to update topic status', { topicId, error: e });
+  }
 }
 
 /**
@@ -343,10 +368,15 @@ async function handleCallback(ctx: BotContext): Promise<void> {
       }
       
       if (ticket.topicId) {
-        // Notify support group that user closed the ticket
+        // Update topic name with closed status
+        await updateTopicStatus(ctx, ticket.topicId, ticket.subject, true);
+        
+        // Notify support group that user closed the ticket with delete button for owners
         try {
+          const closedKeyboard = getClosedTicketKeyboard(ticket.topicId);
           await ctx.api.sendMessage(ctx.config.bot.supportGroupId, ctx.t('ticket.closed_by_user'), {
             message_thread_id: ticket.topicId,
+            reply_markup: closedKeyboard,
           });
         } catch {}
         try { await ctx.api.closeForumTopic(ctx.config.bot.supportGroupId, ticket.topicId); } catch {}
@@ -411,23 +441,37 @@ async function handleCallback(ctx: BotContext): Promise<void> {
         ctx.logger.warn('Failed to log ticket closure by admin', { error: e });
       }
       
-      // Get user's locale for notification
+      // Get user's locale for notification - send without close button (ticket is closed)
       const ticketUser = ctx.db.select().from(users).where(eq(users.telegramId, ticket.telegramId)).get();
       const userLocale = ticketUser?.locale || 'ru';
       try { 
         await ctx.api.sendMessage(ticket.telegramId, ctx.i18n.t('ticket.closed_by_admin', userLocale)); 
       } catch {}
+      
       if (ticket.topicId) {
+        // Update topic name with closed status
+        await updateTopicStatus(ctx, ticket.topicId, ticket.subject, true);
+        
         const adminName = ctx.from?.first_name || 'Admin';
+        // Send notification with delete topic button for owners
+        const closedKeyboard = getClosedTicketKeyboard(ticket.topicId);
         try {
           await ctx.api.sendMessage(ctx.config.bot.supportGroupId, ctx.t('system.ticket_closed_by_admin', { admin: adminName }), {
             message_thread_id: ticket.topicId,
+            reply_markup: closedKeyboard,
           });
         } catch {}
         try { await ctx.api.closeForumTopic(ctx.config.bot.supportGroupId, ticket.topicId); } catch {}
       }
+      
+      // Update the original message - replace admin buttons with delete button
+      if (ticket.topicId) {
+        const closedKeyboard = getClosedTicketKeyboard(ticket.topicId);
+        await ctx.editMessageReplyMarkup({ reply_markup: closedKeyboard });
+      } else {
+        await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
+      }
       await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_closed') });
-      await ctx.editMessageText(ctx.t('admin.ticket_closed'), { reply_markup: new InlineKeyboard() });
     } else {
       await ctx.answerCallbackQuery({ text: 'Уже закрыто' });
     }
@@ -492,6 +536,25 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     return;
   }
 
+  // Admin: delete topic (only for owners)
+  if (data.startsWith(CB.ADMIN_DELETE_TOPIC)) {
+    // Check if user is owner
+    if (role !== 'owner') {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.no_access'), show_alert: true });
+      return;
+    }
+    
+    const topicId = parseInt(data.replace(CB.ADMIN_DELETE_TOPIC, ''));
+    try {
+      await ctx.api.deleteForumTopic(ctx.config.bot.supportGroupId, topicId);
+      await ctx.answerCallbackQuery({ text: '✅ Топик удалён' });
+    } catch (e) {
+      ctx.logger.warn('Failed to delete topic', { topicId, error: e });
+      await ctx.answerCallbackQuery({ text: '❌ Не удалось удалить топик', show_alert: true });
+    }
+    return;
+  }
+
   await ctx.answerCallbackQuery();
 }
 
@@ -535,7 +598,9 @@ async function handleMessage(ctx: BotContext): Promise<void> {
 
     let topicId: number | null = null;
     try {
-      const topic = await ctx.api.createForumTopic(ctx.config.bot.supportGroupId, `${userName} | ${subject.slice(0, 40)}`);
+      const topic = await ctx.api.createForumTopic(ctx.config.bot.supportGroupId, `${userName} | ${subject.slice(0, 40)}`, {
+        icon_color: TOPIC_ICON_COLOR_OPEN,
+      });
       topicId = topic.message_thread_id;
     } catch (e) {
       ctx.logger.error('Failed to create topic', e instanceof Error ? e : new Error(String(e)));
