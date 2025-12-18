@@ -4,13 +4,26 @@
  */
 
 import { Context } from 'grammy';
+import { eq } from 'drizzle-orm';
 import type { SessionManager } from '../services/session.js';
 import type { I18nSystem } from '../services/i18n.js';
 import type { AuditLogger } from '../services/audit-logger.js';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import type * as schema from '../database/schema.js';
+import * as schema from '../database/schema.js';
 import type { Logger } from '../core/logger.js';
 import type { BotConfig } from '../core/config.js';
+
+/**
+ * Cached user data to avoid repeated DB queries
+ */
+export interface CachedUser {
+  id: number;
+  telegramId: number;
+  username: string | null;
+  firstName: string | null;
+  role: 'user' | 'support' | 'owner';
+  locale: string | null;
+}
 
 /**
  * Custom context properties added to grammY context
@@ -30,8 +43,12 @@ export interface BotContextFlavor {
   config: BotConfig;
   /** Current user's locale */
   locale: string;
+  /** Cached user data (loaded once per request) */
+  cachedUser?: CachedUser;
   /** Translate a key using user's locale */
   t(key: string, params?: Record<string, string>): string;
+  /** Get or create user with caching */
+  getUser(): CachedUser | null;
   /** Index signature for compatibility with CommandContext/MiddlewareContext */
   [key: string]: unknown;
 }
@@ -88,6 +105,55 @@ export function createContextFlavor(deps: {
     // Add translation helper
     botCtx.t = (key: string, params?: Record<string, string>) => {
       return deps.i18n.t(key, botCtx.locale, params);
+    };
+    
+    // Add cached user getter
+    botCtx.getUser = () => {
+      if (botCtx.cachedUser) {
+        return botCtx.cachedUser;
+      }
+      
+      const telegramId = ctx.from?.id;
+      if (!telegramId) return null;
+      
+      const isOwnerFromEnv = deps.config.bot.adminIds.includes(telegramId);
+      const currentUsername = ctx.from?.username || null;
+      const currentFirstName = ctx.from?.first_name || null;
+      
+      let user = deps.db.select().from(schema.users).where(eq(schema.users.telegramId, telegramId)).get();
+      
+      if (!user) {
+        deps.db.insert(schema.users).values({
+          telegramId,
+          username: currentUsername,
+          firstName: currentFirstName,
+          role: isOwnerFromEnv ? 'owner' : 'user',
+          createdAt: new Date(),
+        }).run();
+        user = deps.db.select().from(schema.users).where(eq(schema.users.telegramId, telegramId)).get()!;
+      } else {
+        // Update profile info if changed
+        const updates: Record<string, unknown> = {};
+        if (currentUsername !== user.username) updates.username = currentUsername;
+        if (currentFirstName !== user.firstName) updates.firstName = currentFirstName;
+        if (isOwnerFromEnv && user.role !== 'owner') updates.role = 'owner';
+        
+        if (Object.keys(updates).length > 0) {
+          deps.db.update(schema.users).set(updates).where(eq(schema.users.telegramId, telegramId)).run();
+          user = deps.db.select().from(schema.users).where(eq(schema.users.telegramId, telegramId)).get()!;
+        }
+      }
+      
+      botCtx.cachedUser = {
+        id: user.id,
+        telegramId: user.telegramId,
+        username: user.username,
+        firstName: user.firstName,
+        role: user.role as 'user' | 'support' | 'owner',
+        locale: user.locale,
+      };
+      
+      return botCtx.cachedUser;
     };
     
     await next();

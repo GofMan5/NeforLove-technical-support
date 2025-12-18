@@ -47,12 +47,14 @@ export class MiddlewarePipelineImpl<T extends MiddlewareContext = MiddlewareCont
   implements MiddlewarePipeline<T>
 {
   private middlewares: Map<string, MiddlewareDefinition<T>> = new Map();
+  private orderedCache: MiddlewareDefinition<T>[] | null = null;
 
   /**
    * Register a middleware with priority-based ordering
    */
   use(middleware: MiddlewareDefinition<T>): void {
     this.middlewares.set(middleware.name, middleware);
+    this.orderedCache = null; // Invalidate cache
   }
 
   /**
@@ -60,13 +62,17 @@ export class MiddlewarePipelineImpl<T extends MiddlewareContext = MiddlewareCont
    */
   remove(name: string): void {
     this.middlewares.delete(name);
+    this.orderedCache = null; // Invalidate cache
   }
 
   /**
-   * Get middlewares sorted by priority (ascending)
+   * Get middlewares sorted by priority (ascending) - cached
    */
   getOrderedMiddlewares(): MiddlewareDefinition<T>[] {
-    return Array.from(this.middlewares.values()).sort((a, b) => a.priority - b.priority);
+    if (!this.orderedCache) {
+      this.orderedCache = Array.from(this.middlewares.values()).sort((a, b) => a.priority - b.priority);
+    }
+    return this.orderedCache;
   }
 
   async execute(ctx: T): Promise<void> {

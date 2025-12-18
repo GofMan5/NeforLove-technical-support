@@ -46,42 +46,23 @@ export function createSessionManager(
   db: BetterSQLite3Database<typeof schema>,
   defaultTTL: number = DEFAULT_SESSION_TTL
 ): SessionManager {
+  // Simple in-memory cache for sessions (cleared on process restart)
+  const sessionCache = new Map<string, { data: SessionData; timestamp: number }>();
+  const CACHE_TTL = 60000; // 1 minute cache
+  
+  const getCacheKey = (userId: number, chatId: number) => `${userId}:${chatId}`;
+  
   return {
     async get(userId: number, chatId: number): Promise<SessionData> {
-      // Try to find existing session
-      const existingSession = db.select()
-        .from(sessions)
-        .innerJoin(users, eq(sessions.userId, users.id))
-        .where(and(
-          eq(users.telegramId, userId),
-          eq(sessions.chatId, chatId)
-        ))
-        .get();
-
-      if (existingSession) {
-        const session = existingSession.sessions;
-        const user = existingSession.users;
-        
-        // Check if session is expired
-        if (session.expiresAt && session.expiresAt < new Date()) {
-          // Session expired, delete and create new one
-          db.delete(sessions).where(eq(sessions.id, session.id)).run();
-        } else {
-          // Return existing session
-          const data = (session.data || {}) as Record<string, unknown>;
-          return {
-            userId,
-            chatId,
-            locale: user.locale || '',  // Empty string means locale not explicitly set
-            state: data,
-            createdAt: user.createdAt,
-            updatedAt: new Date(),
-            expiresAt: session.expiresAt || undefined,
-          };
-        }
+      const cacheKey = getCacheKey(userId, chatId);
+      const cached = sessionCache.get(cacheKey);
+      
+      // Return cached if fresh
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.data;
       }
-
-      // Create new user if doesn't exist
+      
+      // First get user (single query)
       let user = db.select().from(users)
         .where(eq(users.telegramId, userId))
         .get();
@@ -97,6 +78,35 @@ export function createSessionManager(
           .get()!;
       }
 
+      // Then get session (single query, no JOIN)
+      const existingSession = db.select()
+        .from(sessions)
+        .where(and(
+          eq(sessions.userId, user.id),
+          eq(sessions.chatId, chatId)
+        ))
+        .get();
+
+      if (existingSession) {
+        // Check if session is expired
+        if (existingSession.expiresAt && existingSession.expiresAt < new Date()) {
+          db.delete(sessions).where(eq(sessions.id, existingSession.id)).run();
+        } else {
+          const data = (existingSession.data || {}) as Record<string, unknown>;
+          const sessionData: SessionData = {
+            userId,
+            chatId,
+            locale: user.locale || '',
+            state: data,
+            createdAt: user.createdAt,
+            updatedAt: new Date(),
+            expiresAt: existingSession.expiresAt || undefined,
+          };
+          sessionCache.set(cacheKey, { data: sessionData, timestamp: Date.now() });
+          return sessionData;
+        }
+      }
+
       // Create new session
       const now = new Date();
       const expiresAt = new Date(now.getTime() + defaultTTL);
@@ -108,18 +118,23 @@ export function createSessionManager(
         expiresAt,
       }).run();
 
-      return {
+      const sessionData: SessionData = {
         userId,
         chatId,
-        locale: user.locale || '',  // Empty string means locale not explicitly set
+        locale: user.locale || '',
         state: {},
         createdAt: user.createdAt,
         updatedAt: now,
         expiresAt,
       };
+      sessionCache.set(cacheKey, { data: sessionData, timestamp: Date.now() });
+      return sessionData;
     },
 
     async set(userId: number, chatId: number, data: Partial<SessionData>): Promise<void> {
+      const cacheKey = getCacheKey(userId, chatId);
+      sessionCache.delete(cacheKey); // Invalidate cache
+      
       // Ensure user exists
       let user = db.select().from(users)
         .where(eq(users.telegramId, userId))
@@ -183,6 +198,9 @@ export function createSessionManager(
      * Delete a session
      */
     async delete(userId: number, chatId: number): Promise<void> {
+      const cacheKey = getCacheKey(userId, chatId);
+      sessionCache.delete(cacheKey); // Invalidate cache
+      
       const user = db.select().from(users)
         .where(eq(users.telegramId, userId))
         .get();

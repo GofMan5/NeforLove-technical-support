@@ -11,6 +11,7 @@ import type { BotContext } from '../../bot/context.js';
 const CB = {
   NEW_TICKET: 'ticket:new',
   CLOSE_TICKET: 'ticket:close',
+  CANCEL_TICKET: 'ticket:cancel',
   ADMIN_CLOSE: 'admin:close:',
   ADMIN_BAN: 'admin:ban:',
   ADMIN_BAN_CONFIRM: 'admin:ban_confirm:',
@@ -26,37 +27,10 @@ const CB = {
 // 0x6FB9F0 - Blue (open), 0x8EEE98 - Green (closed)
 const TOPIC_ICON_COLOR_OPEN = 0x6FB9F0;
 
-// Helper to get or create user with role, always updates profile info
-function getOrCreateUser(ctx: BotContext, telegramId: number): { role: UserRole } {
-  const isOwnerFromEnv = ctx.config.bot.adminIds.includes(telegramId);
-  const currentUsername = ctx.from?.username || null;
-  const currentFirstName = ctx.from?.first_name || null;
-  
-  let user = ctx.db.select().from(users).where(eq(users.telegramId, telegramId)).get();
-  
-  if (!user) {
-    ctx.db.insert(users).values({
-      telegramId,
-      username: currentUsername,
-      firstName: currentFirstName,
-      role: isOwnerFromEnv ? 'owner' : 'user',
-      createdAt: new Date(),
-    }).run();
-    user = ctx.db.select().from(users).where(eq(users.telegramId, telegramId)).get()!;
-  } else {
-    // Always update profile info and check owner status
-    const updates: Record<string, unknown> = {};
-    if (currentUsername !== user.username) updates.username = currentUsername;
-    if (currentFirstName !== user.firstName) updates.firstName = currentFirstName;
-    if (isOwnerFromEnv && user.role !== 'owner') updates.role = 'owner';
-    
-    if (Object.keys(updates).length > 0) {
-      ctx.db.update(users).set(updates).where(eq(users.telegramId, telegramId)).run();
-      user = ctx.db.select().from(users).where(eq(users.telegramId, telegramId)).get()!;
-    }
-  }
-  
-  return { role: user.role as UserRole };
+// Helper to get or create user with role - uses cached user from context
+function getOrCreateUser(ctx: BotContext, _telegramId: number): { role: UserRole } {
+  const user = ctx.getUser();
+  return { role: user?.role || 'user' };
 }
 
 function isUserBanned(ctx: BotContext, telegramId: number): boolean {
@@ -276,7 +250,7 @@ async function handleStart(ctx: BotContext): Promise<void> {
   const telegramId = ctx.from!.id;
   const chatId = ctx.chat!.id;
   
-  getOrCreateUser(ctx, telegramId);
+  // User is already created/cached in context middleware via ctx.getUser()
   
   if (isUserBanned(ctx, telegramId)) {
     await ctx.reply(ctx.t('ticket.banned'));
@@ -295,14 +269,8 @@ async function handleStart(ctx: BotContext): Promise<void> {
     return;
   }
   
-  // Returning user - just show main screen, don't reset state if awaiting_subject
-  const session = await ctx.sessionManager.get(telegramId, chatId);
-  const state = (session.state || {}) as Record<string, unknown>;
-  
-  if (!state.awaiting_subject) {
-    await ctx.sessionManager.set(telegramId, chatId, { state: {} });
-  }
-  
+  // Returning user - always reset state for clean UX
+  await ctx.sessionManager.set(telegramId, chatId, { state: {} });
   await showMainScreen(ctx);
 }
 
@@ -345,8 +313,17 @@ async function handleCallback(ctx: BotContext): Promise<void> {
       return;
     }
     await ctx.sessionManager.set(telegramId, chatId, { state: { awaiting_subject: true } });
-    await ctx.editMessageText(ctx.t('ticket.enter_subject'), { reply_markup: new InlineKeyboard() });
+    const cancelKeyboard = new InlineKeyboard().text(ctx.t('buttons.cancel'), CB.CANCEL_TICKET);
+    await ctx.editMessageText(ctx.t('ticket.enter_subject'), { reply_markup: cancelKeyboard });
     await ctx.answerCallbackQuery();
+    return;
+  }
+
+  // User: cancel ticket creation
+  if (data === CB.CANCEL_TICKET) {
+    await ctx.sessionManager.set(telegramId, chatId, { state: {} });
+    await ctx.answerCallbackQuery();
+    await showMainScreen(ctx, true);
     return;
   }
 
@@ -424,7 +401,18 @@ async function handleCallback(ctx: BotContext): Promise<void> {
 
   // Admin: close ticket (in support group)
   if (data.startsWith(CB.ADMIN_CLOSE)) {
+    // Security: check role
+    if (role !== 'support' && role !== 'owner') {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.no_access'), show_alert: true });
+      return;
+    }
+    
     const ticketId = parseInt(data.replace(CB.ADMIN_CLOSE, ''));
+    if (isNaN(ticketId)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid ticket ID' });
+      return;
+    }
+    
     const ticket = ctx.db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
     if (ticket?.status === 'open') {
       ctx.db.update(tickets).set({ status: 'closed', closedAt: new Date() }).where(eq(tickets.id, ticketId)).run();
@@ -464,35 +452,86 @@ async function handleCallback(ctx: BotContext): Promise<void> {
         try { await ctx.api.closeForumTopic(ctx.config.bot.supportGroupId, ticket.topicId); } catch {}
       }
       
-      // Update the original message - replace admin buttons with delete button
+      // Remove action buttons from info message, replace with delete topic button
       if (ticket.topicId) {
-        const closedKeyboard = getClosedTicketKeyboard(ticket.topicId);
-        await ctx.editMessageReplyMarkup({ reply_markup: closedKeyboard });
+        try {
+          await ctx.editMessageReplyMarkup({ reply_markup: getClosedTicketKeyboard(ticket.topicId) });
+        } catch {}
       } else {
-        await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
+        try {
+          await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
+        } catch {}
       }
       await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_closed') });
     } else {
-      await ctx.answerCallbackQuery({ text: 'Уже закрыто' });
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_already_closed') });
     }
     return;
   }
 
-  // Admin: ban
+  // Admin: ban - send confirmation as NEW message, don't edit ticket info
   if (data.startsWith(CB.ADMIN_BAN) && !data.includes('confirm') && !data.includes('cancel')) {
-    const oderId = data.replace(CB.ADMIN_BAN, '');
+    // Security: check role
+    if (role !== 'support' && role !== 'owner') {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.no_access'), show_alert: true });
+      return;
+    }
+    
+    const targetId = data.replace(CB.ADMIN_BAN, '');
+    if (isNaN(parseInt(targetId))) {
+      await ctx.answerCallbackQuery({ text: 'Invalid user ID' });
+      return;
+    }
+    
+    // Get message_id of info message to edit later
+    const infoMessageId = ctx.callbackQuery?.message?.message_id;
+    
     const keyboard = new InlineKeyboard()
-      .text('✅ Да', CB.ADMIN_BAN_CONFIRM + oderId)
-      .text('❌ Нет', CB.ADMIN_BAN_CANCEL);
-    await ctx.editMessageText('⚠️ Заблокировать?', { reply_markup: keyboard });
+      .text('✅ Да', CB.ADMIN_BAN_CONFIRM + targetId + ':' + infoMessageId)
+      .text('❌ Нет', CB.ADMIN_BAN_CANCEL + ':' + infoMessageId);
+    
+    // Send NEW message for confirmation, don't edit ticket info
+    const topicId = ctx.callbackQuery?.message?.message_thread_id;
+    await ctx.api.sendMessage(ctx.chat!.id, '⚠️ Заблокировать пользователя?', { 
+      reply_markup: keyboard,
+      message_thread_id: topicId,
+    });
     await ctx.answerCallbackQuery();
     return;
   }
 
   if (data.startsWith(CB.ADMIN_BAN_CONFIRM)) {
-    const targetUserId = parseInt(data.replace(CB.ADMIN_BAN_CONFIRM, ''));
+    // Security: check role
+    if (role !== 'support' && role !== 'owner') {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.no_access'), show_alert: true });
+      return;
+    }
+    
+    // Parse format: admin:ban_confirm:USER_ID:INFO_MSG_ID
+    const parts = data.replace(CB.ADMIN_BAN_CONFIRM, '').split(':');
+    const targetUserId = parseInt(parts[0]);
+    const infoMessageId = parseInt(parts[1]);
+    
+    if (isNaN(targetUserId)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid user ID' });
+      return;
+    }
+    
+    // Prevent self-ban
+    if (targetUserId === ctx.from!.id) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.cannot_ban_self'), show_alert: true });
+      return;
+    }
+    
+    // Prevent banning owner
+    const targetUser = ctx.db.select().from(users).where(eq(users.telegramId, targetUserId)).get();
+    if (targetUser?.role === 'owner' || ctx.config.bot.adminIds.includes(targetUserId)) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.cannot_ban_owner'), show_alert: true });
+      return;
+    }
+    
     if (!ctx.db.select().from(bannedUsers).where(eq(bannedUsers.telegramId, targetUserId)).get()) {
-      // Get active ticket before banning (for system message)
+      // Get active ticket before banning (for system message and topic update)
       const activeTicket = getActiveTicket(ctx, targetUserId);
       
       ctx.db.insert(bannedUsers).values({ telegramId: targetUserId, bannedAt: new Date() }).run();
@@ -511,11 +550,26 @@ async function handleCallback(ctx: BotContext): Promise<void> {
       }
       
       if (activeTicket?.topicId) {
+        // Update topic name with closed status (consistency with ADMIN_CLOSE)
+        await updateTopicStatus(ctx, activeTicket.topicId, activeTicket.subject, true);
+        
         try {
           await ctx.api.sendMessage(ctx.config.bot.supportGroupId, ctx.t('system.user_banned_in_topic'), {
             message_thread_id: activeTicket.topicId,
           });
         } catch {}
+        
+        // Close the forum topic
+        try { await ctx.api.closeForumTopic(ctx.config.bot.supportGroupId, activeTicket.topicId); } catch {}
+        
+        // Remove buttons from info message, replace with delete topic button
+        if (!isNaN(infoMessageId)) {
+          try {
+            await ctx.api.editMessageReplyMarkup(ctx.chat!.id, infoMessageId, {
+              reply_markup: getClosedTicketKeyboard(activeTicket.topicId),
+            });
+          } catch {}
+        }
       }
       
       // Get user's locale for notification
@@ -525,13 +579,16 @@ async function handleCallback(ctx: BotContext): Promise<void> {
         await ctx.api.sendMessage(targetUserId, ctx.i18n.t('user.banned', userLocale)); 
       } catch {}
     }
+    
     await ctx.answerCallbackQuery({ text: ctx.t('admin.user_banned') });
-    await ctx.editMessageText(ctx.t('admin.user_banned'), { reply_markup: new InlineKeyboard() });
+    // Delete confirmation message
+    await ctx.deleteMessage();
     return;
   }
 
-  if (data === CB.ADMIN_BAN_CANCEL) {
+  if (data.startsWith(CB.ADMIN_BAN_CANCEL)) {
     await ctx.answerCallbackQuery({ text: 'Отменено' });
+    // Delete confirmation message
     await ctx.deleteMessage();
     return;
   }
@@ -545,6 +602,11 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     }
     
     const topicId = parseInt(data.replace(CB.ADMIN_DELETE_TOPIC, ''));
+    if (isNaN(topicId)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid topic ID' });
+      return;
+    }
+    
     try {
       // deleteForumTopic deletes the topic and all its messages
       const result = await ctx.api.deleteForumTopic(ctx.config.bot.supportGroupId, topicId);
@@ -595,7 +657,13 @@ async function handleMessage(ctx: BotContext): Promise<void> {
 
   // Creating ticket
   if (state.awaiting_subject === true && msg.text) {
-    const subject = msg.text.slice(0, 100);
+    const subject = msg.text.trim().slice(0, 100);
+    
+    // Validate non-empty subject
+    if (!subject) {
+      await ctx.reply(ctx.t('ticket.empty_subject'));
+      return;
+    }
     const userName = ctx.from?.first_name || 'User';
     const username = ctx.from?.username ? `@${ctx.from.username}` : '';
 
@@ -679,6 +747,16 @@ async function handleMessage(ctx: BotContext): Promise<void> {
       }
     }
 
+    // CRITICAL: If we couldn't notify support group at all, rollback the ticket
+    if (!adminButtonsSent) {
+      ctx.logger.error('Support group unreachable, rolling back ticket', new Error(`ticketId: ${ticketId}`));
+      ctx.db.delete(tickets).where(eq(tickets.id, ticketId)).run();
+      await ctx.sessionManager.set(telegramId, chatId, { state: {} });
+      await ctx.reply(ctx.t('ticket.creation_failed'));
+      await showMainScreen(ctx);
+      return;
+    }
+
     await ctx.sessionManager.set(telegramId, chatId, { state: {} });
     await ctx.reply(ctx.t('ticket.created', { id: String(ticketId) }));
     await showMainScreen(ctx);
@@ -749,12 +827,25 @@ async function handleAdminReply(ctx: BotContext): Promise<void> {
   const topicId = msg.message_thread_id;
   if (!topicId) return;
   
+  // Security: check role - only support/owner can reply to tickets
+  const { role } = getOrCreateUser(ctx, ctx.from!.id);
+  if (role !== 'support' && role !== 'owner') {
+    return; // Silently ignore messages from non-support users
+  }
+  
   const hasContent = msg.text || msg.photo || msg.video || msg.animation || msg.sticker || msg.voice || msg.video_note || msg.document;
   if (!hasContent) return;
 
   const topicMessageId = msg.message_id;
   const ticket = getTicketByTopicId(ctx, topicId);
-  if (!ticket) return;
+  
+  // Notify admin if ticket is closed or not found
+  if (!ticket) {
+    try {
+      await ctx.reply(ctx.t('system.ticket_not_found'), { message_thread_id: topicId });
+    } catch {}
+    return;
+  }
 
   const media = extractMedia(ctx);
 
@@ -804,12 +895,151 @@ async function handleAdminReply(ctx: BotContext): Promise<void> {
   }).run();
 }
 
+// Command handler for /close - manual ticket closure from topic
+async function handleClose(ctx: BotContext): Promise<void> {
+  // Only works in support group
+  if (ctx.chat?.id !== ctx.config.bot.supportGroupId) return;
+  
+  const topicId = ctx.message?.message_thread_id;
+  if (!topicId) {
+    await ctx.reply(ctx.t('admin.use_in_topic'));
+    return;
+  }
+  
+  // Check role
+  const { role } = getOrCreateUser(ctx, ctx.from!.id);
+  if (role !== 'support' && role !== 'owner') {
+    await ctx.reply(ctx.t('admin.no_access'));
+    return;
+  }
+  
+  // Find ticket by topicId (any status to give proper feedback)
+  const ticket = ctx.db.select().from(tickets).where(eq(tickets.topicId, topicId)).get();
+  if (!ticket) {
+    await ctx.reply(ctx.t('admin.ticket_not_found'));
+    return;
+  }
+  
+  if (ticket.status === 'closed') {
+    await ctx.reply(ctx.t('admin.ticket_already_closed'));
+    return;
+  }
+  
+  // Close ticket
+  ctx.db.update(tickets).set({ status: 'closed', closedAt: new Date() }).where(eq(tickets.id, ticket.id)).run();
+  
+  try {
+    await ctx.auditLogger.log({
+      action: 'ticket_closed_by_admin',
+      actorId: ctx.from!.id,
+      targetId: ticket.telegramId,
+      entityType: 'ticket',
+      entityId: ticket.id,
+    });
+  } catch (e) {
+    ctx.logger.warn('Failed to log ticket closure', { error: e });
+  }
+  
+  // Notify user
+  const ticketUser = ctx.db.select().from(users).where(eq(users.telegramId, ticket.telegramId)).get();
+  const userLocale = ticketUser?.locale || 'ru';
+  try {
+    await ctx.api.sendMessage(ticket.telegramId, ctx.i18n.t('ticket.closed_by_admin', userLocale));
+  } catch {}
+  
+  // Update topic
+  await updateTopicStatus(ctx, topicId, ticket.subject, true);
+  
+  const adminName = ctx.from?.first_name || 'Admin';
+  const closedKeyboard = getClosedTicketKeyboard(topicId);
+  await ctx.reply(ctx.t('system.ticket_closed_by_admin', { admin: adminName }), { reply_markup: closedKeyboard });
+  
+  try { await ctx.api.closeForumTopic(ctx.config.bot.supportGroupId, topicId); } catch {}
+}
+
+// Command handler for /ban - manual user ban from topic
+async function handleBan(ctx: BotContext): Promise<void> {
+  // Only works in support group
+  if (ctx.chat?.id !== ctx.config.bot.supportGroupId) return;
+  
+  const topicId = ctx.message?.message_thread_id;
+  if (!topicId) {
+    await ctx.reply(ctx.t('admin.use_in_topic'));
+    return;
+  }
+  
+  // Check role
+  const { role } = getOrCreateUser(ctx, ctx.from!.id);
+  if (role !== 'support' && role !== 'owner') {
+    await ctx.reply(ctx.t('admin.no_access'));
+    return;
+  }
+  
+  // Find ticket by topicId
+  const ticket = ctx.db.select().from(tickets).where(eq(tickets.topicId, topicId)).get();
+  if (!ticket) {
+    await ctx.reply(ctx.t('admin.ticket_not_found'));
+    return;
+  }
+  
+  const targetUserId = ticket.telegramId;
+  
+  // Prevent self-ban
+  if (targetUserId === ctx.from!.id) {
+    await ctx.reply(ctx.t('admin.cannot_ban_self'));
+    return;
+  }
+  
+  // Prevent banning owner
+  const targetUser = ctx.db.select().from(users).where(eq(users.telegramId, targetUserId)).get();
+  if (targetUser?.role === 'owner' || ctx.config.bot.adminIds.includes(targetUserId)) {
+    await ctx.reply(ctx.t('admin.cannot_ban_owner'));
+    return;
+  }
+  
+  // Check if already banned
+  if (ctx.db.select().from(bannedUsers).where(eq(bannedUsers.telegramId, targetUserId)).get()) {
+    await ctx.reply(ctx.t('admin.user_already_banned'));
+    return;
+  }
+  
+  // Ban user
+  ctx.db.insert(bannedUsers).values({ telegramId: targetUserId, bannedAt: new Date() }).run();
+  ctx.db.update(tickets).set({ status: 'closed', closedAt: new Date() })
+    .where(and(eq(tickets.telegramId, targetUserId), eq(tickets.status, 'open'))).run();
+  
+  try {
+    await ctx.auditLogger.log({
+      action: 'user_banned',
+      actorId: ctx.from!.id,
+      targetId: targetUserId,
+      entityType: 'user',
+    });
+  } catch (e) {
+    ctx.logger.warn('Failed to log user ban', { error: e });
+  }
+  
+  // Update topic
+  await updateTopicStatus(ctx, topicId, ticket.subject, true);
+  await ctx.reply(ctx.t('system.user_banned_in_topic'));
+  
+  try { await ctx.api.closeForumTopic(ctx.config.bot.supportGroupId, topicId); } catch {}
+  
+  // Notify user
+  const userLocale = targetUser?.locale || 'ru';
+  try {
+    await ctx.api.sendMessage(targetUserId, ctx.i18n.t('user.banned', userLocale));
+  } catch {}
+}
+
 export const supportModule: BotModule<BotContext, BotContext> = {
   name: 'support',
   enabled: true,
   commands: [
     { name: 'start', description: 'Запустить бота 🤍', handler: handleStart },
     { name: 'lang', description: 'Сменить язык 🌐', handler: handleLang },
+    { name: 'close', description: 'Закрыть тикет', handler: handleClose, hidden: true },
+    { name: 'ban', description: 'Забанить пользователя', handler: handleBan, hidden: true },
   ],
   handlers: [
     { name: 'support-callback', event: 'callback_query', handler: handleCallback as (ctx: unknown) => Promise<void> },

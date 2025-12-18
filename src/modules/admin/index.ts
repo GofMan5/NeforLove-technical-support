@@ -5,7 +5,8 @@
 import { InlineKeyboard } from 'grammy';
 import { eq, count, and } from 'drizzle-orm';
 import { BotModule } from '../loader.js';
-import { tickets, users, bannedUsers, type UserRole } from '../../database/schema.js';
+import { tickets, users, bannedUsers, messages, type UserRole } from '../../database/schema.js';
+import { desc } from 'drizzle-orm';
 import type { BotContext } from '../../bot/context.js';
 import { createStatisticsService } from '../../services/statistics.js';
 
@@ -28,7 +29,18 @@ const CB = {
   REMOVE_SUPPORT: 'adm:rm_support:',
   UNBAN: 'adm:unban:',
   BACK: 'adm:back',
+  // Ticket management
+  TICKETS_LIST: 'adm:tickets',
+  TICKETS_PAGE: 'adm:tickets_p:',
+  TICKET_VIEW: 'adm:ticket:',
+  TICKET_HISTORY: 'adm:t_hist:',
+  TICKET_HISTORY_PAGE: 'adm:t_hist_p:',
+  TICKET_CLOSE: 'adm:t_close:',
+  TICKET_BAN: 'adm:t_ban:',
 } as const;
+
+const TICKETS_PER_PAGE = 5;
+const MESSAGES_PER_PAGE = 10;
 
 function getUserRole(ctx: BotContext, telegramId: number): UserRole {
   // Always check ADMIN_IDS first - they are always owners
@@ -71,6 +83,7 @@ function getStats(ctx: BotContext) {
 function getAdminKeyboard(role: UserRole): InlineKeyboard {
   const kb = new InlineKeyboard()
     .text('📊 Статистика', CB.STATS_MENU)
+    .text('📋 Тикеты', CB.TICKETS_LIST)
     .row();
   
   if (isOwner(role)) {
@@ -293,6 +306,10 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     }
     
     const targetId = parseInt(data.replace(CB.REMOVE_SUPPORT, ''));
+    if (isNaN(targetId)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid user ID' });
+      return;
+    }
     
     // Get user's locale before removing role
     const targetUser = ctx.db.select().from(users).where(eq(users.telegramId, targetId)).get();
@@ -371,6 +388,10 @@ async function handleCallback(ctx: BotContext): Promise<void> {
   // Unban
   if (data.startsWith(CB.UNBAN)) {
     const targetId = parseInt(data.replace(CB.UNBAN, ''));
+    if (isNaN(targetId)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid user ID' });
+      return;
+    }
     
     // Get user's locale before deleting from banned list
     const targetUser = ctx.db.select().from(users).where(eq(users.telegramId, targetId)).get();
@@ -425,6 +446,369 @@ async function handleCallback(ctx: BotContext): Promise<void> {
         kb.text(`✅ ${name}`, CB.UNBAN + b.telegramId).row();
       }
     }
+    kb.text('◀️ Назад', CB.BACK);
+    
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb });
+    return;
+  }
+  
+  // Tickets list
+  if (data === CB.TICKETS_LIST || data.startsWith(CB.TICKETS_PAGE)) {
+    const page = data === CB.TICKETS_LIST ? 0 : parseInt(data.replace(CB.TICKETS_PAGE, ''));
+    if (isNaN(page)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid page' });
+      return;
+    }
+    
+    const openTickets = ctx.db.select().from(tickets)
+      .where(eq(tickets.status, 'open'))
+      .orderBy(desc(tickets.createdAt))
+      .limit(TICKETS_PER_PAGE)
+      .offset(page * TICKETS_PER_PAGE)
+      .all();
+    
+    const totalCount = ctx.db.select({ count: count() }).from(tickets)
+      .where(eq(tickets.status, 'open')).get()?.count || 0;
+    const totalPages = Math.ceil(totalCount / TICKETS_PER_PAGE);
+    
+    let text = ctx.t('admin.tickets_title') + '\n\n';
+    const kb = new InlineKeyboard();
+    
+    if (openTickets.length === 0) {
+      text += ctx.t('admin.tickets_empty');
+    } else {
+      for (const t of openTickets) {
+        const user = ctx.db.select().from(users).where(eq(users.telegramId, t.telegramId)).get();
+        const name = user?.firstName || 'Без имени';
+        const subj = t.subject.length > 30 ? t.subject.slice(0, 30) + '...' : t.subject;
+        const date = t.createdAt ? new Date(t.createdAt).toLocaleDateString('ru-RU') : '';
+        text += `#${t.id} | ${name}\n📝 ${subj}\n📅 ${date}\n\n`;
+        kb.text(`#${t.id} ${name}`, CB.TICKET_VIEW + t.id).row();
+      }
+      
+      // Pagination
+      const navRow: string[][] = [];
+      if (page > 0) navRow.push(['◀️', CB.TICKETS_PAGE + (page - 1)]);
+      if (page < totalPages - 1) navRow.push(['▶️', CB.TICKETS_PAGE + (page + 1)]);
+      if (navRow.length > 0) {
+        for (const [label, cb] of navRow) kb.text(label, cb);
+        kb.row();
+      }
+    }
+    
+    kb.text('◀️ Назад', CB.BACK);
+    
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb });
+    await ctx.answerCallbackQuery();
+    return;
+  }
+  
+  // View single ticket
+  if (data.startsWith(CB.TICKET_VIEW)) {
+    const ticketId = parseInt(data.replace(CB.TICKET_VIEW, ''));
+    if (isNaN(ticketId)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid ticket ID' });
+      return;
+    }
+    
+    const ticket = ctx.db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+    if (!ticket) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_not_found') });
+      return;
+    }
+    
+    const user = ctx.db.select().from(users).where(eq(users.telegramId, ticket.telegramId)).get();
+    const msgCount = ctx.db.select({ count: count() }).from(messages)
+      .where(eq(messages.ticketId, ticketId)).get()?.count || 0;
+    
+    const name = user?.firstName || 'Без имени';
+    const uname = user?.username ? `@${user.username}` : '';
+    const link = `[${name}](tg://user?id=${ticket.telegramId})`;
+    const date = ticket.createdAt ? new Date(ticket.createdAt).toLocaleString('ru-RU') : '';
+    const status = ticket.status === 'open' ? '🟢 Открыт' : '🔴 Закрыт';
+    
+    let text = ctx.t('admin.ticket_info_title', { id: String(ticketId) }) + '\n\n' +
+      `👤 ${link} ${uname}\n` +
+      `🆔 \`${ticket.telegramId}\`\n` +
+      `📝 ${ticket.subject}\n` +
+      `💬 ${ctx.t('admin.messages_count', { count: String(msgCount) })}\n` +
+      `📅 ${date}\n` +
+      `📊 ${status}`;
+    
+    const kb = new InlineKeyboard()
+      .text('💬 ' + ctx.t('admin.history_btn'), CB.TICKET_HISTORY + ticketId + ':0')
+      .row();
+    
+    // Topic link
+    if (ticket.topicId) {
+      const chatId = String(ctx.config.bot.supportGroupId).replace('-100', '');
+      kb.url('🔗 ' + ctx.t('admin.topic_link'), `https://t.me/c/${chatId}/${ticket.topicId}`).row();
+    }
+    
+    // Actions only for open tickets
+    if (ticket.status === 'open') {
+      kb.text('❌ ' + ctx.t('admin.close_btn'), CB.TICKET_CLOSE + ticketId)
+        .text('🚫 ' + ctx.t('admin.ban_btn'), CB.TICKET_BAN + ticketId)
+        .row();
+    }
+    
+    kb.text('◀️ Назад', CB.TICKETS_LIST);
+    
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb });
+    await ctx.answerCallbackQuery();
+    return;
+  }
+  
+  // Ticket message history
+  if (data.startsWith(CB.TICKET_HISTORY)) {
+    const parts = data.replace(CB.TICKET_HISTORY, '').split(':');
+    const ticketId = parseInt(parts[0]);
+    const page = parseInt(parts[1] || '0');
+    
+    if (isNaN(ticketId) || isNaN(page)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid params' });
+      return;
+    }
+    
+    const ticket = ctx.db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+    if (!ticket) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_not_found') });
+      return;
+    }
+    
+    const ticketMessages = ctx.db.select().from(messages)
+      .where(eq(messages.ticketId, ticketId))
+      .orderBy(desc(messages.createdAt))
+      .limit(MESSAGES_PER_PAGE)
+      .offset(page * MESSAGES_PER_PAGE)
+      .all();
+    
+    const totalMsgs = ctx.db.select({ count: count() }).from(messages)
+      .where(eq(messages.ticketId, ticketId)).get()?.count || 0;
+    const totalPages = Math.ceil(totalMsgs / MESSAGES_PER_PAGE);
+    
+    let text = ctx.t('admin.history_title', { id: String(ticketId) }) + '\n\n';
+    
+    if (ticketMessages.length === 0) {
+      text += ctx.t('admin.history_empty');
+    } else {
+      // Reverse to show oldest first on page
+      for (const m of ticketMessages.reverse()) {
+        const sender = m.isAdmin ? '🛡️' : '👤';
+        const time = m.createdAt ? new Date(m.createdAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
+        const content = m.text 
+          ? (m.text.length > 50 ? m.text.slice(0, 50) + '...' : m.text)
+          : `[${m.mediaType || 'media'}]`;
+        text += `${sender} ${time}: ${content}\n`;
+      }
+    }
+    
+    const kb = new InlineKeyboard();
+    
+    // Pagination
+    const navRow: string[][] = [];
+    if (page < totalPages - 1) navRow.push(['⬆️ Старые', CB.TICKET_HISTORY + ticketId + ':' + (page + 1)]);
+    if (page > 0) navRow.push(['⬇️ Новые', CB.TICKET_HISTORY + ticketId + ':' + (page - 1)]);
+    if (navRow.length > 0) {
+      for (const [label, cb] of navRow) kb.text(label, cb);
+      kb.row();
+    }
+    
+    kb.text('◀️ К тикету', CB.TICKET_VIEW + ticketId);
+    
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb });
+    await ctx.answerCallbackQuery();
+    return;
+  }
+  
+  // Close ticket from admin panel
+  if (data.startsWith(CB.TICKET_CLOSE)) {
+    const ticketId = parseInt(data.replace(CB.TICKET_CLOSE, ''));
+    if (isNaN(ticketId)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid ticket ID' });
+      return;
+    }
+    
+    const ticket = ctx.db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+    if (!ticket) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_not_found') });
+      return;
+    }
+    
+    if (ticket.status !== 'open') {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_already_closed') });
+      return;
+    }
+    
+    // Close ticket
+    ctx.db.update(tickets).set({ status: 'closed', closedAt: new Date() })
+      .where(eq(tickets.id, ticketId)).run();
+    
+    // Get user locale
+    const targetUser = ctx.db.select().from(users).where(eq(users.telegramId, ticket.telegramId)).get();
+    const userLocale = targetUser?.locale || 'ru';
+    
+    // Notify user
+    try {
+      await ctx.api.sendMessage(ticket.telegramId, ctx.i18n.t('ticket.closed_by_admin', userLocale));
+    } catch {}
+    
+    // Send system message to topic and close it
+    if (ticket.topicId) {
+      const admin = ctx.from!;
+      const adminName = admin.first_name || admin.username || String(admin.id);
+      try {
+        await ctx.api.sendMessage(ctx.config.bot.supportGroupId, 
+          ctx.t('system.ticket_closed_by_admin', { admin: adminName }), {
+          message_thread_id: ticket.topicId,
+        });
+      } catch {}
+      // Close the forum topic
+      try { await ctx.api.closeForumTopic(ctx.config.bot.supportGroupId, ticket.topicId); } catch {}
+    }
+    
+    try {
+      await ctx.auditLogger.log({
+        action: 'ticket_closed_by_admin',
+        actorId: telegramId,
+        targetId: ticket.telegramId,
+        entityType: 'ticket',
+        entityId: ticketId,
+      });
+    } catch {}
+    
+    await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_closed') });
+    
+    // Refresh ticket view
+    const msgCount = ctx.db.select({ count: count() }).from(messages)
+      .where(eq(messages.ticketId, ticketId)).get()?.count || 0;
+    
+    const name = targetUser?.firstName || 'Без имени';
+    const uname = targetUser?.username ? `@${targetUser.username}` : '';
+    const link = `[${name}](tg://user?id=${ticket.telegramId})`;
+    const date = ticket.createdAt ? new Date(ticket.createdAt).toLocaleString('ru-RU') : '';
+    
+    let text = ctx.t('admin.ticket_info_title', { id: String(ticketId) }) + '\n\n' +
+      `👤 ${link} ${uname}\n` +
+      `🆔 \`${ticket.telegramId}\`\n` +
+      `📝 ${ticket.subject}\n` +
+      `💬 ${ctx.t('admin.messages_count', { count: String(msgCount) })}\n` +
+      `📅 ${date}\n` +
+      `📊 🔴 Закрыт`;
+    
+    const kb = new InlineKeyboard()
+      .text('💬 ' + ctx.t('admin.history_btn'), CB.TICKET_HISTORY + ticketId + ':0')
+      .row();
+    
+    if (ticket.topicId) {
+      const chatId = String(ctx.config.bot.supportGroupId).replace('-100', '');
+      kb.url('🔗 ' + ctx.t('admin.topic_link'), `https://t.me/c/${chatId}/${ticket.topicId}`).row();
+    }
+    
+    kb.text('◀️ Назад', CB.TICKETS_LIST);
+    
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb });
+    return;
+  }
+  
+  // Ban user from admin panel
+  if (data.startsWith(CB.TICKET_BAN)) {
+    const ticketId = parseInt(data.replace(CB.TICKET_BAN, ''));
+    if (isNaN(ticketId)) {
+      await ctx.answerCallbackQuery({ text: 'Invalid ticket ID' });
+      return;
+    }
+    
+    const ticket = ctx.db.select().from(tickets).where(eq(tickets.id, ticketId)).get();
+    if (!ticket) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.ticket_not_found') });
+      return;
+    }
+    
+    // Check if already banned
+    const alreadyBanned = ctx.db.select().from(bannedUsers)
+      .where(eq(bannedUsers.telegramId, ticket.telegramId)).get();
+    if (alreadyBanned) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.user_already_banned') });
+      return;
+    }
+    
+    // Self-ban protection
+    if (ticket.telegramId === telegramId) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.cannot_ban_self') });
+      return;
+    }
+    
+    // Owner protection
+    if (ctx.config.bot.adminIds.includes(ticket.telegramId)) {
+      await ctx.answerCallbackQuery({ text: ctx.t('admin.cannot_ban_owner') });
+      return;
+    }
+    
+    // Ban user
+    ctx.db.insert(bannedUsers).values({
+      telegramId: ticket.telegramId,
+      bannedAt: new Date(),
+    }).run();
+    
+    // Close ticket
+    ctx.db.update(tickets).set({ status: 'closed', closedAt: new Date() })
+      .where(eq(tickets.id, ticketId)).run();
+    
+    // Get user locale
+    const targetUser = ctx.db.select().from(users).where(eq(users.telegramId, ticket.telegramId)).get();
+    const userLocale = targetUser?.locale || 'ru';
+    
+    // Notify user
+    try {
+      await ctx.api.sendMessage(ticket.telegramId, ctx.i18n.t('user.banned', userLocale));
+    } catch {}
+    
+    // Send system message to topic and close it
+    if (ticket.topicId) {
+      try {
+        await ctx.api.sendMessage(ctx.config.bot.supportGroupId, ctx.t('system.user_banned_in_topic'), {
+          message_thread_id: ticket.topicId,
+        });
+      } catch {}
+      // Close the forum topic
+      try { await ctx.api.closeForumTopic(ctx.config.bot.supportGroupId, ticket.topicId); } catch {}
+    }
+    
+    try {
+      await ctx.auditLogger.log({
+        action: 'user_banned',
+        actorId: telegramId,
+        targetId: ticket.telegramId,
+        entityType: 'user',
+      });
+    } catch {}
+    
+    await ctx.answerCallbackQuery({ text: ctx.t('admin.user_banned') });
+    
+    // Go back to tickets list
+    const openTickets = ctx.db.select().from(tickets)
+      .where(eq(tickets.status, 'open'))
+      .orderBy(desc(tickets.createdAt))
+      .limit(TICKETS_PER_PAGE)
+      .all();
+    
+    let text = ctx.t('admin.tickets_title') + '\n\n';
+    const kb = new InlineKeyboard();
+    
+    if (openTickets.length === 0) {
+      text += ctx.t('admin.tickets_empty');
+    } else {
+      for (const t of openTickets) {
+        const user = ctx.db.select().from(users).where(eq(users.telegramId, t.telegramId)).get();
+        const name = user?.firstName || 'Без имени';
+        const subj = t.subject.length > 30 ? t.subject.slice(0, 30) + '...' : t.subject;
+        const date = t.createdAt ? new Date(t.createdAt).toLocaleDateString('ru-RU') : '';
+        text += `#${t.id} | ${name}\n📝 ${subj}\n📅 ${date}\n\n`;
+        kb.text(`#${t.id} ${name}`, CB.TICKET_VIEW + t.id).row();
+      }
+    }
+    
     kb.text('◀️ Назад', CB.BACK);
     
     await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb });

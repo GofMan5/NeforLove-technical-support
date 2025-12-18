@@ -31,7 +31,8 @@
     "english": "🇬🇧 English",
     "russian": "🇷🇺 Русский",
     "new_ticket": "📝 Create ticket",
-    "close_ticket": "❌ Close ticket"
+    "close_ticket": "❌ Close ticket",
+    "cancel": "❌ Cancel"
   },
   "ticket": {
     "active": "🎫 Ticket #{{id}}\n📝 {{subject}}\n📅 {{date}}\n\n💬 Send messages or photos — we'll receive them.",
@@ -44,7 +45,9 @@
     "already_exists": "You already have an active ticket",
     "message_sent": "✅ Message sent",
     "photo_sent": "✅ Photo sent",
-    "banned": "🚫 You are banned and cannot create tickets."
+    "banned": "🚫 You are banned and cannot create tickets.",
+    "empty_subject": "❌ Please describe your issue. Empty messages are not accepted.",
+    "creation_failed": "❌ Failed to create ticket. Please try again later or contact administrator."
   },
   "user": {
     "banned": "🚫 You have been banned.",
@@ -56,11 +59,27 @@
   },
   "admin": {
     "ticket_closed": "❌ Ticket closed",
+    "ticket_already_closed": "Ticket is already closed",
+    "ticket_not_found": "❌ Ticket not found",
     "user_banned": "🚫 User banned",
     "user_unbanned": "✅ User unbanned",
+    "user_already_banned": "User is already banned",
     "no_access": "❌ Access denied",
     "topic_deleted": "✅ Topic deleted",
-    "topic_delete_failed": "❌ Failed to delete topic"
+    "topic_delete_failed": "❌ Failed to delete topic",
+    "use_in_topic": "❌ Use this command in a ticket topic",
+    "cannot_ban_self": "❌ Cannot ban yourself",
+    "cannot_ban_owner": "❌ Cannot ban owner",
+    "tickets_title": "📋 *Open Tickets*",
+    "tickets_empty": "_No open tickets_",
+    "ticket_info_title": "🎫 *Ticket #{{id}}*",
+    "messages_count": "Messages: {{count}}",
+    "history_btn": "History",
+    "topic_link": "Go to topic",
+    "close_btn": "Close",
+    "ban_btn": "Ban",
+    "history_title": "💬 *Ticket #{{id}} History*",
+    "history_empty": "_No messages_"
   },
   "errors": {
     "generic": "An error occurred. Please try again later."
@@ -70,6 +89,7 @@
     "user_banned_in_topic": "🚫 User banned by administrator",
     "user_unbanned_in_topic": "✅ User unbanned by administrator",
     "message_delivery_failed": "⚠️ Failed to deliver message. Please try again.",
-    "message_forward_failed": "⚠️ Failed to forward message to support. Please try again."
+    "message_forward_failed": "⚠️ Failed to forward message to support. Please try again.",
+    "ticket_not_found": "⚠️ Ticket is closed or not found."
   }
 }

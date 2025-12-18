@@ -131,7 +131,7 @@ describe('Session Manager Property Tests', () => {
             // Verify session was created with defaults
             expect(session.userId).toBe(userId);
             expect(session.chatId).toBe(chatId);
-            expect(session.locale).toBe('en');
+            expect(session.locale).toBe(''); // Empty string means locale not explicitly set
             expect(session.state).toEqual({});
             expect(session.expiresAt).toBeDefined();
 

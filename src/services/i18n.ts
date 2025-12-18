@@ -4,6 +4,7 @@
  */
 
 import * as fs from 'fs';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 
 export interface TranslationFile {
@@ -67,6 +68,48 @@ export class I18nSystem {
         throw error;
       }
     }
+  }
+
+  /**
+   * Load translations asynchronously (non-blocking)
+   */
+  async loadTranslationsAsync(localesPath?: string): Promise<void> {
+    const targetPath = localesPath || this.localesPath;
+
+    try {
+      await fsp.access(targetPath);
+    } catch {
+      throw new I18nError(`Locales directory not found: ${targetPath}`);
+    }
+
+    const files = await fsp.readdir(targetPath);
+    const jsonFiles = files.filter(f => f.endsWith('.json'));
+
+    if (jsonFiles.length === 0) {
+      throw new I18nError(`No translation files found in: ${targetPath}`);
+    }
+
+    // Load all files in parallel
+    await Promise.all(jsonFiles.map(async (file) => {
+      const locale = path.basename(file, '.json');
+      const filePath = path.join(targetPath, file);
+      
+      try {
+        const content = await fsp.readFile(filePath, 'utf-8');
+        const translations = JSON.parse(content);
+        
+        if (!this.validateTranslationFile(translations)) {
+          throw new I18nError(`Invalid translation file format: ${file}`);
+        }
+        
+        this.translations.set(locale, translations);
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          throw new I18nError(`Invalid JSON in translation file: ${file}`);
+        }
+        throw error;
+      }
+    }));
   }
 
   validateTranslationFile(obj: unknown): obj is TranslationFile {
