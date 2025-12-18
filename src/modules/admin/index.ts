@@ -68,6 +68,11 @@ function isOwner(role: UserRole): boolean {
   return role === 'owner';
 }
 
+// Escape Markdown special characters to prevent parsing errors
+function escapeMarkdown(text: string): string {
+  return text.replace(/_/g, '\\_');
+}
+
 // Get statistics
 function getStats(ctx: BotContext) {
   const totalUsers = ctx.db.select({ count: count() }).from(users).get()?.count || 0;
@@ -266,11 +271,11 @@ async function handleCallback(ctx: BotContext): Promise<void> {
       text += '_Пусто_';
     } else {
       for (const s of supports) {
-        const name = s.firstName || 'Без имени';
-        const uname = s.username ? `@${s.username}` : '';
+        const name = escapeMarkdown(s.firstName || 'Без имени');
+        const uname = s.username ? `@${escapeMarkdown(s.username)}` : '';
         const link = `[${name}](tg://user?id=${s.telegramId})`;
         text += `• ${link} ${uname}\n  ID: \`${s.telegramId}\`\n`;
-        kb.text(`❌ ${name}`, CB.REMOVE_SUPPORT + s.telegramId).row();
+        kb.text(`❌ ${s.firstName || 'Без имени'}`, CB.REMOVE_SUPPORT + s.telegramId).row();
       }
     }
     
@@ -346,11 +351,11 @@ async function handleCallback(ctx: BotContext): Promise<void> {
       text += '_Пусто_';
     } else {
       for (const s of supports) {
-        const name = s.firstName || 'Без имени';
-        const uname = s.username ? `@${s.username}` : '';
+        const name = escapeMarkdown(s.firstName || 'Без имени');
+        const uname = s.username ? `@${escapeMarkdown(s.username)}` : '';
         const link = `[${name}](tg://user?id=${s.telegramId})`;
         text += `• ${link} ${uname}\n  ID: \`${s.telegramId}\`\n`;
-        kb.text(`❌ ${name}`, CB.REMOVE_SUPPORT + s.telegramId).row();
+        kb.text(`❌ ${s.firstName || 'Без имени'}`, CB.REMOVE_SUPPORT + s.telegramId).row();
       }
     }
     kb.text('◀️ Назад', CB.BACK);
@@ -371,11 +376,11 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     } else {
       for (const b of banned) {
         const user = ctx.db.select().from(users).where(eq(users.telegramId, b.telegramId)).get();
-        const name = user?.firstName || 'Без имени';
-        const uname = user?.username ? `@${user.username}` : '';
+        const name = escapeMarkdown(user?.firstName || 'Без имени');
+        const uname = user?.username ? `@${escapeMarkdown(user.username)}` : '';
         const link = `[${name}](tg://user?id=${b.telegramId})`;
         text += `• ${link} ${uname}\n  ID: \`${b.telegramId}\`\n`;
-        kb.text(`✅ ${name}`, CB.UNBAN + b.telegramId).row();
+        kb.text(`✅ ${user?.firstName || 'Без имени'}`, CB.UNBAN + b.telegramId).row();
       }
     }
     kb.text('◀️ Назад', CB.BACK);
@@ -439,11 +444,11 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     } else {
       for (const b of banned) {
         const user = ctx.db.select().from(users).where(eq(users.telegramId, b.telegramId)).get();
-        const name = user?.firstName || 'Без имени';
-        const uname = user?.username ? `@${user.username}` : '';
+        const name = escapeMarkdown(user?.firstName || 'Без имени');
+        const uname = user?.username ? `@${escapeMarkdown(user.username)}` : '';
         const link = `[${name}](tg://user?id=${b.telegramId})`;
         text += `• ${link} ${uname}\n  ID: \`${b.telegramId}\`\n`;
-        kb.text(`✅ ${name}`, CB.UNBAN + b.telegramId).row();
+        kb.text(`✅ ${user?.firstName || 'Без имени'}`, CB.UNBAN + b.telegramId).row();
       }
     }
     kb.text('◀️ Назад', CB.BACK);
@@ -479,11 +484,11 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     } else {
       for (const t of openTickets) {
         const user = ctx.db.select().from(users).where(eq(users.telegramId, t.telegramId)).get();
-        const name = user?.firstName || 'Без имени';
-        const subj = t.subject.length > 30 ? t.subject.slice(0, 30) + '...' : t.subject;
+        const name = escapeMarkdown(user?.firstName || 'Без имени');
+        const subj = escapeMarkdown(t.subject.length > 30 ? t.subject.slice(0, 30) + '...' : t.subject);
         const date = t.createdAt ? new Date(t.createdAt).toLocaleDateString('ru-RU') : '';
         text += `#${t.id} | ${name}\n📝 ${subj}\n📅 ${date}\n\n`;
-        kb.text(`#${t.id} ${name}`, CB.TICKET_VIEW + t.id).row();
+        kb.text(`#${t.id} ${user?.firstName || 'Без имени'}`, CB.TICKET_VIEW + t.id).row();
       }
       
       // Pagination
@@ -521,8 +526,8 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     const msgCount = ctx.db.select({ count: count() }).from(messages)
       .where(eq(messages.ticketId, ticketId)).get()?.count || 0;
     
-    const name = user?.firstName || 'Без имени';
-    const uname = user?.username ? `@${user.username}` : '';
+    const name = escapeMarkdown(user?.firstName || 'Без имени');
+    const uname = user?.username ? `@${escapeMarkdown(user.username)}` : '';
     const link = `[${name}](tg://user?id=${ticket.telegramId})`;
     const date = ticket.createdAt ? new Date(ticket.createdAt).toLocaleString('ru-RU') : '';
     const status = ticket.status === 'open' ? '🟢 Открыт' : '🔴 Закрыт';
@@ -530,7 +535,7 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     let text = ctx.t('admin.ticket_info_title', { id: String(ticketId) }) + '\n\n' +
       `👤 ${link} ${uname}\n` +
       `🆔 \`${ticket.telegramId}\`\n` +
-      `📝 ${ticket.subject}\n` +
+      `📝 ${escapeMarkdown(ticket.subject)}\n` +
       `💬 ${ctx.t('admin.messages_count', { count: String(msgCount) })}\n` +
       `📅 ${date}\n` +
       `📊 ${status}`;
@@ -683,15 +688,15 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     const msgCount = ctx.db.select({ count: count() }).from(messages)
       .where(eq(messages.ticketId, ticketId)).get()?.count || 0;
     
-    const name = targetUser?.firstName || 'Без имени';
-    const uname = targetUser?.username ? `@${targetUser.username}` : '';
+    const name = escapeMarkdown(targetUser?.firstName || 'Без имени');
+    const uname = targetUser?.username ? `@${escapeMarkdown(targetUser.username)}` : '';
     const link = `[${name}](tg://user?id=${ticket.telegramId})`;
     const date = ticket.createdAt ? new Date(ticket.createdAt).toLocaleString('ru-RU') : '';
     
     let text = ctx.t('admin.ticket_info_title', { id: String(ticketId) }) + '\n\n' +
       `👤 ${link} ${uname}\n` +
       `🆔 \`${ticket.telegramId}\`\n` +
-      `📝 ${ticket.subject}\n` +
+      `📝 ${escapeMarkdown(ticket.subject)}\n` +
       `💬 ${ctx.t('admin.messages_count', { count: String(msgCount) })}\n` +
       `📅 ${date}\n` +
       `📊 🔴 Закрыт`;
@@ -801,11 +806,11 @@ async function handleCallback(ctx: BotContext): Promise<void> {
     } else {
       for (const t of openTickets) {
         const user = ctx.db.select().from(users).where(eq(users.telegramId, t.telegramId)).get();
-        const name = user?.firstName || 'Без имени';
-        const subj = t.subject.length > 30 ? t.subject.slice(0, 30) + '...' : t.subject;
+        const name = escapeMarkdown(user?.firstName || 'Без имени');
+        const subj = escapeMarkdown(t.subject.length > 30 ? t.subject.slice(0, 30) + '...' : t.subject);
         const date = t.createdAt ? new Date(t.createdAt).toLocaleDateString('ru-RU') : '';
         text += `#${t.id} | ${name}\n📝 ${subj}\n📅 ${date}\n\n`;
-        kb.text(`#${t.id} ${name}`, CB.TICKET_VIEW + t.id).row();
+        kb.text(`#${t.id} ${user?.firstName || 'Без имени'}`, CB.TICKET_VIEW + t.id).row();
       }
     }
     
