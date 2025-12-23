@@ -90,6 +90,7 @@
     "user_unbanned_in_topic": "✅ User unbanned by administrator",
     "message_delivery_failed": "⚠️ Failed to deliver message. Please try again.",
     "message_forward_failed": "⚠️ Failed to forward message to support. Please try again.",
-    "ticket_not_found": "⚠️ Ticket is closed or not found."
+    "ticket_not_found": "⚠️ Ticket is closed or not found.",
+    "rate_limited": "⏳ Too many requests. Please wait a moment."
   }
 }

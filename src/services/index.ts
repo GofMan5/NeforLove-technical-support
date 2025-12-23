@@ -10,3 +10,4 @@ export * from './i18n.js';
 export * from './error-handler.js';
 export * from './audit-logger.js';
 export * from './statistics.js';
+export * from './rate-limiter.js';

@@ -7,6 +7,7 @@ import { eq, and } from 'drizzle-orm';
 import { BotModule } from '../loader.js';
 import { tickets, messages, bannedUsers, users, type MediaType, type UserRole } from '../../database/schema.js';
 import type { BotContext } from '../../bot/context.js';
+import { rateLimiters } from '../../services/rate-limiter.js';
 
 const CB = {
   NEW_TICKET: 'ticket:new',
@@ -278,13 +279,20 @@ async function handleCallback(ctx: BotContext): Promise<void> {
   const data = ctx.callbackQuery?.data;
   if (!data) return;
 
+  const telegramId = ctx.from!.id;
+  
+  // Rate limit callbacks
+  if (!rateLimiters.callbacks.check(`cb:${telegramId}`)) {
+    await ctx.answerCallbackQuery({ text: 'Слишком много запросов, подождите', show_alert: true });
+    return;
+  }
+
   // Noop button - just answer callback
   if (data === 'noop') {
     await ctx.answerCallbackQuery();
     return;
   }
 
-  const telegramId = ctx.from!.id;
   const chatId = ctx.chat!.id;
   const { role } = getOrCreateUser(ctx, telegramId);
 
@@ -657,6 +665,20 @@ async function handleMessage(ctx: BotContext): Promise<void> {
 
   // Creating ticket
   if (state.awaiting_subject === true && msg.text) {
+    // Rate limit ticket creation
+    if (!rateLimiters.ticketCreation.check(`ticket:${telegramId}`)) {
+      await ctx.reply(ctx.t('system.rate_limited'));
+      return;
+    }
+    
+    // Double-check no active ticket (race condition prevention)
+    if (getActiveTicket(ctx, telegramId)) {
+      await ctx.sessionManager.set(telegramId, chatId, { state: {} });
+      await ctx.reply(ctx.t('ticket.already_exists'));
+      await showMainScreen(ctx);
+      return;
+    }
+    
     const subject = msg.text.trim().slice(0, 100);
     
     // Validate non-empty subject
@@ -768,6 +790,12 @@ async function handleMessage(ctx: BotContext): Promise<void> {
   if (!ticket) {
     await ctx.reply(ctx.t('ticket.no_active'));
     await showMainScreen(ctx);
+    return;
+  }
+
+  // Rate limit messages
+  if (!rateLimiters.messages.check(`msg:${telegramId}`)) {
+    await ctx.reply(ctx.t('system.rate_limited'));
     return;
   }
 

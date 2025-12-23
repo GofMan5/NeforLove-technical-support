@@ -49,11 +49,42 @@ export function createSessionManager(
   // Simple in-memory cache for sessions (cleared on process restart)
   const sessionCache = new Map<string, { data: SessionData; timestamp: number }>();
   const CACHE_TTL = 60000; // 1 minute cache
+  const MAX_CACHE_SIZE = 1000; // Prevent memory leak
+  let lastCacheCleanup = Date.now();
+  const CACHE_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
   
   const getCacheKey = (userId: number, chatId: number) => `${userId}:${chatId}`;
   
+  // Cleanup stale cache entries
+  const cleanupCache = () => {
+    const now = Date.now();
+    if (now - lastCacheCleanup < CACHE_CLEANUP_INTERVAL && sessionCache.size < MAX_CACHE_SIZE) {
+      return;
+    }
+    
+    for (const [key, entry] of sessionCache) {
+      if (now - entry.timestamp > CACHE_TTL) {
+        sessionCache.delete(key);
+      }
+    }
+    
+    // If still too large, remove oldest entries
+    if (sessionCache.size > MAX_CACHE_SIZE) {
+      const entries = [...sessionCache.entries()]
+        .sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = entries.slice(0, sessionCache.size - MAX_CACHE_SIZE + 100);
+      for (const [key] of toRemove) {
+        sessionCache.delete(key);
+      }
+    }
+    
+    lastCacheCleanup = now;
+  };
+  
   return {
     async get(userId: number, chatId: number): Promise<SessionData> {
+      cleanupCache(); // Run cleanup on access
+      
       const cacheKey = getCacheKey(userId, chatId);
       const cached = sessionCache.get(cacheKey);
       

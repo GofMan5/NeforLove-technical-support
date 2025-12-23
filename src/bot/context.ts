@@ -123,13 +123,18 @@ export function createContextFlavor(deps: {
       let user = deps.db.select().from(schema.users).where(eq(schema.users.telegramId, telegramId)).get();
       
       if (!user) {
-        deps.db.insert(schema.users).values({
-          telegramId,
-          username: currentUsername,
-          firstName: currentFirstName,
-          role: isOwnerFromEnv ? 'owner' : 'user',
-          createdAt: new Date(),
-        }).run();
+        // Use INSERT OR IGNORE to handle race condition
+        try {
+          deps.db.insert(schema.users).values({
+            telegramId,
+            username: currentUsername,
+            firstName: currentFirstName,
+            role: isOwnerFromEnv ? 'owner' : 'user',
+            createdAt: new Date(),
+          }).onConflictDoNothing().run();
+        } catch {
+          // Ignore duplicate key errors
+        }
         user = deps.db.select().from(schema.users).where(eq(schema.users.telegramId, telegramId)).get()!;
       } else {
         // Update profile info if changed

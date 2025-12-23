@@ -48,6 +48,7 @@ export class TelegramBot {
   private deps: BotDependencies;
   private options: BotOptions;
   private isRunning: boolean = false;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(deps: BotDependencies, options: BotOptions = {}) {
     this.deps = deps;
@@ -259,7 +260,7 @@ export class TelegramBot {
    * Start the bot
    */
   async start(): Promise<void> {
-    const { logger } = this.deps;
+    const { logger, sessionManager, auditLogger } = this.deps;
     
     if (this.isRunning) {
       logger.warn('Bot is already running');
@@ -276,6 +277,19 @@ export class TelegramBot {
     if (this.options.registerCommands) {
       await this.registerCommandsWithTelegram();
     }
+    
+    // Start periodic cleanup (every hour)
+    this.cleanupInterval = setInterval(async () => {
+      try {
+        const sessionsCleanedUp = await sessionManager.cleanup();
+        const logsCleanedUp = await auditLogger.cleanup();
+        if (sessionsCleanedUp > 0 || logsCleanedUp > 0) {
+          logger.debug('Periodic cleanup completed', { sessionsCleanedUp, logsCleanedUp });
+        }
+      } catch (e) {
+        logger.warn('Periodic cleanup failed', { error: e });
+      }
+    }, 60 * 60 * 1000); // 1 hour
     
     // Start polling
     this.isRunning = true;
@@ -299,6 +313,12 @@ export class TelegramBot {
     }
     
     logger.info('Stopping bot...');
+    
+    // Stop cleanup interval
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
     
     // Shutdown modules
     const modules = moduleLoader.getAllModules();

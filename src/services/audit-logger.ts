@@ -3,7 +3,7 @@
  * Logs administrative actions for audit trail
  */
 
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, lt, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { auditLogs, type AuditAction, type AuditEntityType } from '../database/schema.js';
 import * as schema from '../database/schema.js';
@@ -42,12 +42,19 @@ export interface AuditLogger {
   getByActor(actorId: number, limit?: number): Promise<AuditLogEntry[]>;
   getByTarget(targetId: number, limit?: number): Promise<AuditLogEntry[]>;
   getByAction(action: AuditAction, limit?: number): Promise<AuditLogEntry[]>;
+  /** Cleanup old logs, returns number of deleted entries */
+  cleanup(olderThanDays?: number): Promise<number>;
 }
 
 /**
  * Default limit for query results
  */
 const DEFAULT_LIMIT = 100;
+
+/**
+ * Default retention period for audit logs (90 days)
+ */
+const DEFAULT_RETENTION_DAYS = 90;
 
 /**
  * Creates an audit logger instance
@@ -141,6 +148,27 @@ export function createAuditLogger(
         metadata: r.metadata,
         createdAt: r.createdAt,
       }));
+    },
+
+    async cleanup(olderThanDays: number = DEFAULT_RETENTION_DAYS): Promise<number> {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+      
+      // Get count before deletion
+      const countResult = db.select({ count: sql<number>`count(*)` })
+        .from(auditLogs)
+        .where(lt(auditLogs.createdAt, cutoffDate))
+        .get();
+      
+      const count = countResult?.count || 0;
+      
+      if (count > 0) {
+        db.delete(auditLogs)
+          .where(lt(auditLogs.createdAt, cutoffDate))
+          .run();
+      }
+      
+      return count;
     },
   };
 }
