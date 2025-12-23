@@ -1,0 +1,34 @@
+# ============================================================================
+# Telegram Support Bot - Docker Compose
+# ============================================================================
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: support-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/data/bot.db
+      - LOCALES_PATH=/app/locales
+    volumes:
+      # Persist database
+      - ./data:/app/data
+      # Optional: custom locales
+      - ./locales:/app/locales:ro
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M

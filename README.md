@@ -1,57 +1,22 @@
 # Telegram Support Bot
 
-Модульный бот техподдержки на grammY + Drizzle ORM.
+Бот техподдержки с тикетами и топиками. grammY + Drizzle + SQLite.
 
-## Быстрая установка
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support/main/install.sh | bash
-```
-
-Скрипт автоматически:
-- Клонирует репозиторий
-- Устанавливает зависимости
-- Запрашивает конфигурацию (токен, ID админов, ID группы)
-- Настраивает базу данных
-- Создаёт systemd сервис
-
-Флаги: `--no-systemd`, `--dir <path>`, `--local`, `--help`
-
-## Обновление
+## Запуск
 
 ```bash
-cd ~/support-bot && curl -fsSL https://raw.githubusercontent.com/GofMan5/NeforLove-technical-support/main/update.sh | bash
-```
-
-Или локально:
-
-```bash
-./update.sh
-```
-
-Скрипт обновления:
-- Создаёт бэкап (.env, data, locales)
-- Останавливает сервис
-- Получает обновления из git
-- Обновляет зависимости и компилирует
-- Запускает миграции БД
-- Перезапускает сервис
-
-Флаги: `--no-backup`, `--no-tests`, `--force`, `--help`
-
-## Ручная установка
-
-```bash
-npm install
+git clone https://github.com/GofMan5/NeforLove-technical-support
+cd NeforLove-technical-support
 cp .env.example .env
-# заполни .env
-npm run build
-npm run db:migrate
+# заполнить .env
+docker compose up -d
 ```
 
-## Настройка
+Логи: `docker compose logs -f`
 
-Создай группу в телеграме с топиками, добавь бота админом.
+## Конфигурация
+
+Создай группу с топиками, добавь бота админом.
 
 ```env
 BOT_TOKEN=токен_от_botfather
@@ -63,36 +28,15 @@ DEFAULT_LOCALE=ru
 LOCALES_PATH=./locales
 ```
 
-## Запуск
+## Разработка
 
 ```bash
-npm run dev    # разработка
-npm start      # продакшн
-```
-
-## Управление сервисом
-
-```bash
-sudo systemctl status support-bot
-sudo systemctl restart support-bot
-sudo journalctl -u support-bot -f
-```
-
-## Структура
-
-```
-src/
-├── bot/          # grammY инстанс
-├── commands/     # реестр команд
-├── core/         # конфиг, логгер
-├── database/     # drizzle схема
-├── middleware/   # пайплайн
-├── modules/      # support, admin
-└── services/     # i18n, сессии, аудит
-```
-
-## Тесты
-
-```bash
+npm install
+npm run dev
 npm test
+npm run db:studio
 ```
+
+## Лицензия
+
+MIT

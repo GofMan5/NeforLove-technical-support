@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build output (will be built in container)
+dist/
+
+# Environment files (use docker-compose env_file)
+.env
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test files
+*.test.ts
+*.spec.ts
+coverage/
+.nyc_output/
+
+# Documentation
+*.md
+!README.md
+
+# Scripts (not needed in container)
+install.sh
+update.sh
+
+# Database (mounted as volume)
+data/*.db
+
+# Kiro/IDE config
+.kiro/
